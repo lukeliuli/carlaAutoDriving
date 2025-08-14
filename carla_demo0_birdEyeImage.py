@@ -119,11 +119,11 @@ import carla
 from visualize_networkx_occ import visualize_save_occ_as_vehlococcplt
 from visualize_networkx_occ import visualize_save_occ_as_vehlocplt
 from visualize_networkx_occ import visualize_save_occpath_as_vehlococcplt
+from visualize_networkx_occ import save_occpath_networkx_opencv
 
-# X_new = x - a
- #Y_new = b - y  # 等价于 -(y - b)
-#a, b: 新坐标系的原点在原坐标系中的坐标（即平移向量）
-def vehicleOCC_to_netwrokxGrid(vehiclepts,occ):
+
+#经过处理后，occ2矩阵不变情况下，vehicle loc occ坐标系和opencv,networkx一致，只是不同的画法而已
+def vehicleOCC_xy_to_netwrokxGrid_rowcol(vehiclepts,occ):
 
     #平移后新原点在原坐标系中的位置 (a, b)
     h,w = occ.shape
@@ -131,26 +131,33 @@ def vehicleOCC_to_netwrokxGrid(vehiclepts,occ):
     b = h
     x_old = vehiclepts[0] 
     y_old = vehiclepts[1] 
-    x_new = x_old -a 
-    y_new = b - y_old # y变
-    return np.array([x_new,y_new]).astype(np.int32)
+    x_new = x_old
+    y_new = y_old
+    col = int(x_new)
+    row = int(y_new)
 
-# X_new = x - a
- #Y_new = b - y  # 等价于 -(y - b)
- # a, b: 新坐标系的原点在原坐标系中的坐标（即平移向量）
-def netwrokxGrid_to_vehicleOCC(pts,occ):
-    pts = np.array(pts)
+    return np.array([row,col])
+
+
+
+def netwrokxGrid_rowscols_to_vehicleOCC_xy(path_nodes,occ):
+    # netwrokxGrid的PATH里面的pts存储nodes，node为(rows,col)
+    path_nodes = np.array(path_nodes)
+    pts = path_nodes
+    return pts
     #print(pts)
     #平移后新原点在原坐标系中的位置 (a, b)
     h,w = occ.shape
     a = 0
     b = h
-    x_old = pts[:,0] 
-    y_old = pts[:,1] 
-    x_new = x_old +a 
-    y_new = b - y_old # y变
-    pts[:,0] = x_new
-    pts[:,1] = y_new
+    row = path_nodes[:,0]  # 注意
+    col = path_nodes[:,1]
+    y_old = row
+    x_old = col 
+    x_new = x_old 
+    y_new = y_old # y变
+    pts[:,0] = row
+    pts[:,1] = col
     return pts
 
 def lidar_to_world(lidar_sensor, point_cloud):
@@ -379,7 +386,7 @@ def create_graph_from_occupancy_grid(occ2, resolution=0.5, x_range=(-100, 100), 
     buffer_cells = int(obstacle_buffer / resolution)
     
     # 使用NumPy快速找到所有障碍物位置,建立的坐标是网格坐标系， (0, 0) 在左上角，X轴向右，Y轴向下
-    obstacle_positions = np.argwhere(occ2 == 255)
+    obstacle_positions = np.argwhere(occ3 >0)
     
     # 预生成所有可能的偏移量
     dr = np.arange(-buffer_cells, buffer_cells + 1)
@@ -398,8 +405,12 @@ def create_graph_from_occupancy_grid(occ2, resolution=0.5, x_range=(-100, 100), 
             (nodes[:, 1] >= 0) & (nodes[:, 1] < cols)
         ]
         # 添加到待移除集合
-        
-        occ3[valid_nodes[:, 0], valid_nodes[:, 1]] = 255
+        #
+        # valid_nodes[:, 0] = rows
+        # valid_nodes[:, 1] = cols
+        occ3[valid_nodes[:, 0], valid_nodes[:, 1]] = 255 #
+    
+
     
     G=grid_to_graph_vectorized(occ3)  #将占用栅格转换为无向图，使用 NumPy 向量化操作加速。
     return G,occ3
@@ -413,7 +424,8 @@ def find_path(occ2, startpts, goalpts, resolution=0.5,x_range=(-100, 100), y_ran
     goalpts2 =  vehicle_to_occupancy(goalpts,  resolution, x_range, y_range)
     startpts2 = startpts2[0]
     goalpts2 = goalpts2[0]
-
+    
+    print("resolution,startpts2,goalpts2:",resolution,startpts2,goalpts2)
     #输入occ2为为车辆本地OCC坐标(左下角为原点，X轴向前指向车头，Y轴向上)
     # startpts2,endpts2 为车辆本地OCC坐标
     filename_startwith = 'out/occVehLoc_'
@@ -425,18 +437,22 @@ def find_path(occ2, startpts, goalpts, resolution=0.5,x_range=(-100, 100), y_ran
     #输入occ2为为车辆本地OCC坐标(左下角为原点，X轴向前指向车头，Y轴向上)
     #startpts2,endpts2 为车辆本地OCC坐标
     #注意networkx的为(左上角为原点，X轴向前指向车头，Y轴向下)
+    # 输出oocc3为车辆本地OCC坐标
     G,occ3= create_graph_from_occupancy_grid(occ2,resolution, x_range, y_range,obstacle_buffer=1)
-    occ3Tmp = occ3.copy()
- 
+   
     filename_startwith = 'out/occVehLoc_obstaclebuffer_'
-    visualize_save_occ_as_vehlococcplt(occ3Tmp, startpts2,goalpts2,filename_startwith)
+    visualize_save_occ_as_vehlococcplt(occ3, startpts2,goalpts2,filename_startwith)
     
+    
+    #startpts3,goalpts3 为 netwrokxGrid（opencv图像）坐标系 (rows,cols)
+    startpts3 = vehicleOCC_xy_to_netwrokxGrid_rowcol(startpts2,occ3)
+    goalpts3 =  vehicleOCC_xy_to_netwrokxGrid_rowcol(goalpts2,occ3)
+    print("vehicle local OC,原点左上角,Y轴向上.(x,y)",startpts2,goalpts2)
+    print("netwrokxGrid,原点左上角,Y轴向下 (rows,cols):",startpts3,goalpts3)
 
-
-    startpts3 = vehicleOCC_to_netwrokxGrid(startpts2,occ2)
-    goalpts3 = vehicleOCC_to_netwrokxGrid(goalpts2,occ2)
-    print("vehicle local OC,原点左上角,Y轴向上",startpts2,goalpts2)
-    print("netwrokxGrid,原点左上角,Y轴向下:",startpts3,goalpts3)
+    startpts3T = (startpts3[1],startpts3[0])
+    goalpts3T = (goalpts3[1],goalpts3[0])
+    print("netwrokxGrid,原点左上角,Y轴向下 (x_cols,y_rows):",startpts3T,goalpts3T)
     
     #print(G.nodes)
     startpts3 = (startpts3[0],startpts3[1])
@@ -448,17 +464,27 @@ def find_path(occ2, startpts, goalpts, resolution=0.5,x_range=(-100, 100), y_ran
         raise ValueError("终点在障碍物或缓冲区内，无法规划路径。")
 
     # 使用 A* 算法进行路径规划
+    path = None
     try:
         #path = nx.astar_path(G, startpts3, goalpts3, heuristic=lambda a, b: np.linalg.norm(np.array(a) - np.array(b)))
-        path = nx.dijkstra_path(G, startpts3, goalpts3)
-        #path = nx.shortest_path(G, start, goal)
-        #path = nx.bidirectional_dijkstra(G, start, goal)
-        #path = nx.astar_path(G, startpts3, goalpts3, heuristic=lambda a, b: abs(a[0]-b[0]) + abs(a[1]-b[1]))
+        #path = nx.dijkstra_path(G, startpts3, goalpts3)
+        path = nx.shortest_path(G, source=startpts3, target=goalpts3)
+        path = np.array(path) 
+        #path = nx.shortest_path_length(G, source=startpts3, target=goalpts3)
 
-        path2 = netwrokxGrid_to_vehicleOCC(path,occ3)
-        print(f"找到路径，路径长度: {len(path2)}")
+        print("所有路径长度最少的路径：", path)
+                
+        #path = nx.bidirectional_dijkstra(G, startpts3, goalpts3)
+        #print(path)
+        #path = nx.astar_path(G, startpts3, goalpts3, heuristic=lambda a, b: abs(a[0]-goalpts3[0]) + abs(a[1]-goalpts3[1]))
         
-        return path2,G,occ3,startpts2,goalpts2
+
+        path2 = netwrokxGrid_rowscols_to_vehicleOCC_xy(path,occ3)
+        print(f"找到路径，路径长度: {len(path2)}")
+         
+        #path为netwrokxGrid（opencv图像）坐标系 ,node为row,col
+  
+        return path2,G,occ3,startpts2,goalpts2,path,startpts3,goalpts3 # 
     except nx.NetworkXNoPath:
         print("无法找到路径。")
         return None, None, None, None, None
@@ -466,7 +492,7 @@ def find_path(occ2, startpts, goalpts, resolution=0.5,x_range=(-100, 100), y_ran
 
 def lidar_data_callback(data,queue):
     queue.put(data)
-
+import time
 def process_lidar_data2(point_cloud,lidar,vehicle,birdseye_image):
     
     data = np.frombuffer(point_cloud.raw_data, dtype=np.dtype([
@@ -509,7 +535,8 @@ def process_lidar_data2(point_cloud,lidar,vehicle,birdseye_image):
     resolution=0.5
     x_range=(-100, 100)
     y_range=(-100, 100)
-
+   
+    occ = None
     occ = lidar_to_occupancy(lidar_points, labels2, resolution,x_range, y_range)
 
     occ2 = occ.astype(np.uint8)*255  # 存储类别 ID
@@ -529,19 +556,24 @@ def process_lidar_data2(point_cloud,lidar,vehicle,birdseye_image):
 
     #输入是车本地坐标系，start, goal在内部转为网格坐标系统
     #输入occ矩阵是车本地坐标local系,左下角为原点，X轴向前指向车头，Y轴向上(已经经过翻转)
-    # 输出的path是networkx网格坐标系(等同opencv图像坐标系)
-    # startpts3,goalpts3 为networkx网格坐标系(等同opencv图像坐标系)
-    # startpts2,goalpts2 为车本地网格坐标系
-    # 输出occ矩阵是车本地坐标local系,左下角为原点，X轴向前指向车头，Y轴向上(已经经过翻转)
-    path2,G,occ3,startpts2,goalpts2 = find_path(occ2, start, goal) #输入是车本地坐标系，在内部转为网格坐标系统，输出的path是车本地坐标系
+
+    # 输出的path2,startpts2,goalpts2 车本地坐标local系,左下角为原点，X轴向前指向车头
+    # 输出occ3矩阵是车本地坐标local系,左下角为原点，X轴向前指向车头，Y轴向上(已经经过翻转)
+
+    # path,startpts3,goalpts3 为netwrokxGrid（opencv图像）坐标系,occ3的路径和为0（没有经过障碍物）  
+    # path的nodes,nodes为为row,col
+    path2,G,occ3,startpts2,goalpts2,path,startpts3,goalpts3 = find_path(occ2, start, goal,resolution,x_range, y_range) #输入是车本地坐标系，在内部转为网格坐标系统，输出的path是车本地坐标系
     #内部转为networkx网格坐标系(等同opencv图像坐标系)
 
     # 可视化结果并保存图像
     if path2 is not None:
-        print("path2 is not Non")
-        filename_startwith = 'out/occ3_pathAstar_'
-        visualize_save_occpath_as_vehlococcplt(occ3,path2,startpts2,goalpts2,filename_startwith)
-        time.sleep
+
+
+        filename_startwith = 'out/occ3_pathAstar_opencv_'
+        #visualize_save_occpath_as_vehlococcplt(occ3,path2,startpts2,goalpts2,filename_startwith)
+        #save_occpath_networkx_opencv(occ3,path2,startpts2,goalpts2,filename_startwith)
+        save_occpath_networkx_opencv(occ3,path,startpts3,goalpts3,filename_startwith)
+        time.sleep(2)
         
   
     
@@ -800,6 +832,7 @@ def main():
     lidar.listen(lambda data: lidar_data_callback(data, lidar_queue))
 
     try:
+        frame  = 0
         while True:
             world.tick()
             
@@ -816,6 +849,10 @@ def main():
             control= carla.VehicleControl(throttle=0.2, steer=-0.2, brake=0.0, hand_brake=False, reverse=False)
             control.manual_gear_shift = False
             vehicle.apply_control(control)
+            frame = frame + 1
+            if frame >5:
+                cv2.waitKey()
+
     finally:
         lidar.destroy()
         camera.destroy()

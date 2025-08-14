@@ -3,6 +3,7 @@ import networkx as nx
 import numpy as np
 import datetime
 import cv2
+import math
 def visualize_networkx_as_occ(G, resolution=0.5, x_range=(-100, 100), y_range=(-100, 100)):
     """
     将networkX图对象或坐标元组显示为类似占据栅格地图(OCC)的图像
@@ -142,6 +143,10 @@ def visualize_save_occ_as_vehlocplt(occ3, vehicle,originpts,filename_startwith,r
 def visualize_save_occpath_as_vehlococcplt(occvehloc,path,startpts,endpts,filename_startwith):
         
         occ3 = occvehloc
+  
+        sumcheck = sum(occ3[path[:,0],path[:,1]])
+        print("sumcheck:",sumcheck) #保证所过路径总和必须为0
+
         plt.imshow(occ3, cmap='gray',origin = 'lower') #坐标系原点在左下角，Y轴向上
 
         plt.plot(startpts[0], startpts[1], marker='o', color='green')  # 绘制起点
@@ -152,8 +157,61 @@ def visualize_save_occpath_as_vehlococcplt(occvehloc,path,startpts,endpts,filena
         path_y = path[:,1]
         plt.plot(path_x, path_y, marker='o', color='yellow',markersize=1)  # 绘制起点
 
-
+       
         filename = filename_startwith + datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.jpg'
         plt.savefig(filename)
         plt.close()
-   
+
+
+#path,startpts,endpts 输入都是row,col坐标
+#startpts,endpts netwrokxGrid,原点左上角,Y轴向下 (rows,cols):",startpts3,goalpts3
+#path的坐标时（rows,cols）
+#cv画线时坐标时(cols,rows),
+def save_occpath_networkx_opencv(occvehloc,path,startpts,endpts,filename_startwith):
+    
+    print("startpts,endpts(rows,cols):",startpts,endpts)
+    #path(row,col)  =(排，列)  
+    occ3 = occvehloc.copy()
+    tmp = occ3[path[:,0],path[:,1]]
+    print(tmp)
+    sumcheck = sum(tmp)
+    print("sumcheck:",sumcheck) #保证所过路径总和必须为0
+
+    occ3 = cv2.cvtColor(occvehloc, cv2.COLOR_GRAY2BGR)
+    
+    #cv画线时坐标时(cols,rows),
+    #pt =(x,y) = (col,row)
+    pt1 = (10, 10)
+    pt2 = (30, 10)
+    cv2.line(occ3, pt1, pt2, (0, 255, 255), 1)
+    cv2.putText(occ3, "cols(X)", (50, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 1)
+
+    pt1 = (10, 10)
+    pt2 = (10, 30)
+    cv2.line(occ3, pt1, pt2, (0, 255, 255), 1)
+    cv2.putText(occ3, "rows(Y)", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 1)
+    
+    #startpts,endpts netwrokxGrid,原点左上角,Y轴向下 (rows,cols):",startpts3,goalpts3
+
+    #cv画线时坐标时(cols = X,rows =Y),
+    cv2.circle(occ3, (startpts[1], startpts[0]), 2, (0, 255, 255), 1)
+    cv2.circle(occ3, (endpts[1], endpts[0]), 2, (0, 0, 255), 1)
+    
+    #path坐标时(rows,cols)
+    #cv画线时坐标时(cols = X,rows =Y),
+    for i in range(len(path) - 1):
+        pt1 = (path[i][1],path[i][0])
+        pt2 = (path[i+1][1],path[i+1][0])
+        cv2.line(occ3, pt1, pt2, (0, 255, 255), 1)
+        
+
+        #row = path[i,0]
+        #col = path[i,1]
+        #occ3[row,col] = [0,255,255]
+  
+
+    #occ3 = np.flipud(occ3)
+
+    filename = filename_startwith + datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.jpg'
+    cv2.imwrite(filename, occ3)
+     
